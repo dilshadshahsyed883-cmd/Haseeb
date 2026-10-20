@@ -41,7 +41,7 @@ if ($LASTEXITCODE -ne 0 -or $trustedSha -notmatch '^[a-f0-9]{40}$') { throw "Bad
 $endpoint = "repos/$RepoName/actions/workflows/build-windows.yml/runs?branch=main&head_sha=$trustedSha&per_page=100"
 $json = & gh api --method GET -H "Accept: application/vnd.github+json" $endpoint
 if ($LASTEXITCODE -ne 0) { throw "Cannot query GitHub Windows Build workflow runs. No deployment attempted." }
-$response = $json | ConvertFrom-Json
+$response = ($json -join "`n") | ConvertFrom-Json
 $runs = @($response.workflow_runs)
 $run = $null
 foreach ($item in $runs) {
