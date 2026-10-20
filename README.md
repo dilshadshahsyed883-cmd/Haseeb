@@ -29,3 +29,12 @@ For actual Haseeb PC install, follow [PC deployment guide](docs/PC_DEPLOYMENT.md
 ## Isolation
 
 Every app has its own versioned releases and active pointer. A broken smoke test cannot replace the active pointer; rollback restores the previously activated version. Deployment does not install a self-hosted GitHub Actions runner or open inbound ports.
+
+
+## Two-way PC deployment feedback
+
+The Windows updater also has a privacy-safe PC -> GitHub feedback lane:
+durable, deduplicated install success/failure outcomes go to the
+`Haseeb PC Deployment Feedback` GitHub Actions workflow and a 30-day
+JSON artifact. Raw diagnostics never leave the Windows PC.
+See `docs/PC_DEPLOYMENT.md` for the reporting contract and limitations.
