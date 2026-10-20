@@ -1,0 +1,6 @@
+{
+  "id": "haseeb-control",
+  "name": "Haseeb PC Control Center",
+  "version": "0.1.0",
+  "entry_point": "main.py"
+}
