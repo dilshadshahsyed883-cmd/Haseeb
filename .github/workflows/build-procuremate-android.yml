@@ -26,7 +26,12 @@ jobs:
         with:
           gradle-version: '8.10.2'
       - name: Install SDK 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          set -eu
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          SDKMGR="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -1)"
+          test -x "$SDKMGR"
+          "$SDKMGR" --sdk_root="${ANDROID_HOME}" "platforms;android-35" "build-tools;35.0.0"
       - name: Build test APK
         working-directory: apps/procuremate-android
         run: gradle :app:assembleDebug --no-daemon --stacktrace
