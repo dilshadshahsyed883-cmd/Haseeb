@@ -25,13 +25,13 @@ To roll back that app:
 
     powershell -NoProfile -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Rollback-Haseeb.ps1" -AppId haseeb-control
 
-## Opt-in hourly sync
+## Automatic near-real-time update checks
 
 Only after the first manual sync is confirmed:
 
     powershell -NoProfile -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Sync-Haseeb.ps1" -RegisterTask
 
-This creates a Windows Scheduled Task named `HaseebDesktopSync`. No public listener, inbound SSH rule, or self-hosted Actions runner is configured by this project.
+This registers the existing Windows Scheduled Task named `HaseebDesktopSync` to check GitHub every **2 minutes**, rather than hourly. On a matching successful `main` Windows Build, it downloads and activates the validated bundle automatically. The PC must be awake and connected to the internet; a build ready just after a check waits until the next check (usually within about 2 minutes), plus normal download/install time. This is fast periodic polling, **not an instantaneous GitHub push**. No public listener, inbound SSH rule, or self-hosted Actions runner is configured.
 
 ## Multi-app release safety
 
@@ -61,12 +61,14 @@ durable database transaction. Backups/previous releases remain available.
 The owner's existing PC remains the only installation target. The repository
 can stay PUBLIC; the GitHub CLI login stays solely on that Windows PC.
 
-The scheduler invokes `ops/windows/Run-HaseebSync.ps1`, a thin wrapper around
-the exact-main-SHA guarded `Sync-Haseeb.ps1`. It prevents overlapping updater
-runs, writes logs under `%LOCALAPPDATA%\Haseeb\logs\`, and retains up to
-60 log files. No unrelated application or data folders are cleaned.
+The 2-minute scheduler invokes `ops/windows/Run-HaseebSync.ps1`, a thin
+wrapper around the exact-main-SHA guarded `Sync-Haseeb.ps1`. It prevents
+overlapping updater runs, writes logs under `%LOCALAPPDATA%\Haseeb\logs\`,
+and retains the latest 720 check logs (about 24 hours). A no-change check
+skips download and reinstallation. No unrelated application or data folders
+are cleaned.
 
-After the new release is synced, upgrade the already-existing scheduled task once:
+To replace an existing HOURLY task with automatic TWO-MINUTE checks, do this one-time task registration after new source has reached the PC:
 
     powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Sync-Haseeb.ps1" -RegisterTask
 

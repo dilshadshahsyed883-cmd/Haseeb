@@ -54,11 +54,11 @@ catch {
 finally {
     if ($transcribing) {
         Stop-Transcript | Out-Null
-        # Retain up to the latest 60 runs, never delete app files.
+        # Retain the latest 720 checks (~24h at a 2-minute cadence), never delete app files.
         try {
             @(Get-ChildItem -LiteralPath $logRoot -Filter "sync-*.log" -File |
                 Sort-Object LastWriteTimeUtc -Descending |
-                Select-Object -Skip 60) | ForEach-Object {
+                Select-Object -Skip 720) | ForEach-Object {
                 Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
             }
         }
