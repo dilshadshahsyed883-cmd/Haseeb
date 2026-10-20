@@ -103,6 +103,57 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
     Write-Host "Already deployed run $($runId). No download needed."
     return
 }
+
+# When CI passed but ONLY allowlisted deployment-system source files changed
+# since the last installed app bundle, never re-download identical app binaries.
+# Unknown paths, missing prior source SHA, or git planner errors fail closed.
+$installedShaPath = Join-Path $InstallRoot "last-successful-sha.txt"
+$planner = Join-Path $RepoPath "tools\release_planner.py"
+if ((Test-Path -LiteralPath $installedShaPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $planner -PathType Leaf)) {
+    $installedSha = (Get-Content -LiteralPath $installedShaPath -Raw).Trim()
+    if ($installedSha -match '^[a-f0-9]{40}# A unique attempt directory avoids GH CLI overwrite prompts when an earlier
+# scheduled task was interrupted mid-download.
+$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId + "-" + [guid]::NewGuid().ToString("N"))
+try {
+    Write-Host "[HASEEB] Download phase: starting guarded release artifact fetch."
+    & python (Join-Path $RepoPath "tools\download_artifact.py") --run-id $runId --dir $download --timeout-seconds 600
+    if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
+    $archives = @(Get-ChildItem -LiteralPath $download -Filter "*.zip" -File)
+    if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
+    Write-Host "[HASEEB] Download phase PASS. Starting checksum and bundled app smoke tests."
+    # All app ZIPs must pass checksum + self-test before ANY active app is switched.
+    # If a later app fails, previous installed app pointers stay unchanged.
+    $archivePaths = @($archives | ForEach-Object { $_.FullName })
+    Write-Host "Validating and activating $($archivePaths.Count) app packages as one bundle"
+    & python (Join-Path $RepoPath "tools\haseeb.py") deploy-bundle --root $InstallRoot @archivePaths
+    if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed; successful-run marker not advanced." }
+    # Preserve the exact installed source SHA for trusted PC->GitHub reporting.
+    Write-Host "[HASEEB] Bundle validation and installation PASS. Recording verified release."
+    Set-Content -Path (Join-Path $InstallRoot "last-successful-sha.txt") -Value $trustedSha -Encoding ASCII
+    Set-Content -Path $marker -Value ($runId) -Encoding ASCII
+    Write-Host "Haseeb PC deployment complete for run $($runId)"
+}
+finally {
+    # Delete only this job's downloaded build data. Installed releases are preserved.
+    if (Test-Path $download) { Remove-Item -LiteralPath $download -Recurse -Force }
+}
+) {
+        & python $planner --repo $RepoPath --previous-sha $installedSha --current-sha $trustedSha
+        $planResult = $LASTEXITCODE
+        if ($planResult -eq 0) {
+            Write-Host "[HASEEB] Verified successful source-only build $runId."
+            Write-Host "[HASEEB] App files and package recipe unchanged; no 31 MB artifact download required."
+            # Do not advance 'last-successful-run.txt': it identifies the last
+            # actually installed app bundle, not the last system-only commit.
+            Set-Content -Path (Join-Path $InstallRoot "last-verified-source-run.txt") -Value $runId -Encoding ASCII
+            return
+        }
+        if ($planResult -ne 10) {
+            throw "Cannot validate release delta. Existing installed apps preserved."
+        }
+    }
+}
 # A unique attempt directory avoids GH CLI overwrite prompts when an earlier
 # scheduled task was interrupted mid-download.
 $download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId + "-" + [guid]::NewGuid().ToString("N"))
