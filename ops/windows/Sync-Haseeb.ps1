@@ -8,7 +8,8 @@
 param(
     [string]$RepoPath = (Join-Path $env:LOCALAPPDATA "Haseeb\repo"),
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Haseeb\installed"),
-    [switch]$RegisterTask
+    [switch]$RegisterTask,
+    [switch]$AfterSourceRefresh
 )
 $ErrorActionPreference = "Stop"
 $RepoName = "dilshadshahsyed883-cmd/Haseeb"
@@ -94,9 +95,103 @@ $runId = [string]$run.id
 if ($runId -notmatch '^[0-9]+$') { throw "Invalid build run ID. No deployment attempted." }
 Write-Host "Verified successful build: run $runId, SHA $trustedSha"
 
-# Update the local script source only after successful CI for the exact main SHA.
+# Capture the script source commit BEFORE changing any files on disk.
+# PowerShell continues running the old parsed script after a git fast-forward;
+# without handoff, old command-line flags may invoke a newer Python script.
+$executingSourceSha = (& git -C $RepoPath rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $executingSourceSha -notmatch '^[a-f0-9]{40}
+$marker = Join-Path $InstallRoot "last-successful-run.txt"
+if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
+    Write-Host "Already deployed run $($runId). No download needed."
+    return
+}
+
+# Plan source-only updates even for older Haseeb installs which stored only
+# last-successful-run.txt (not last-successful-sha.txt). A legacy run is
+# resolved through GitHub's verified successful main Windows Build metadata.
+# Installed application release pointers must also be present and valid.
+$planner = Join-Path $RepoPath "tools\release_planner.py"
+$oldShaPath = Join-Path $InstallRoot "last-successful-sha.txt"
+$plannerArgs = @("--repo", $RepoPath, "--install-root", $InstallRoot, "--current-sha", $trustedSha)
+$priorIdentity = $false
+if (Test-Path -LiteralPath $oldShaPath -PathType Leaf) {
+    $oldSha = (Get-Content -LiteralPath $oldShaPath -Raw).Trim()
+    if ($oldSha -match '^[a-f0-9]{40}$') {
+        $plannerArgs += @("--previous-sha", $oldSha)
+        $priorIdentity = $true
+    }
+}
+if ((-not $priorIdentity) -and (Test-Path -LiteralPath $marker -PathType Leaf)) {
+    $previousRun = (Get-Content -LiteralPath $marker -Raw).Trim()
+    if ($previousRun -match '^[0-9]{1,20}$') {
+        Write-Host "[HASEEB] Legacy app release has no SHA marker; verifying installed run through GitHub."
+        $plannerArgs += @("--previous-run-id", $previousRun)
+        $priorIdentity = $true
+    }
+}
+if ($priorIdentity -and (Test-Path -LiteralPath $planner -PathType Leaf)) {
+    & python $planner @plannerArgs
+    $planResult = $LASTEXITCODE
+    if ($planResult -eq 0) {
+        Write-Host "[HASEEB] No app/package changes. Skipping redundant artifact download."
+        # Not a new app installation: preserve the last installed bundle run.
+        Set-Content -Path (Join-Path $InstallRoot "last-verified-source-run.txt") -Value $runId -Encoding ASCII
+        return
+    }
+    if ($planResult -ne 10) {
+        throw "Release planner error. Existing installed apps preserved."
+    }
+}
+# A unique attempt directory avoids GH CLI overwrite prompts when an earlier
+# scheduled task was interrupted mid-download.
+$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId + "-" + [guid]::NewGuid().ToString("N"))
+try {
+    Write-Host "[HASEEB] Download phase: starting guarded release artifact fetch."
+    & python (Join-Path $RepoPath "tools\download_artifact.py") --run-id $runId --dir $download --timeout-seconds 600
+    if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
+    $archives = @(Get-ChildItem -LiteralPath $download -Filter "*.zip" -File)
+    if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
+    Write-Host "[HASEEB] Download phase PASS. Starting checksum and bundled app smoke tests."
+    # All app ZIPs must pass checksum + self-test before ANY active app is switched.
+    # If a later app fails, previous installed app pointers stay unchanged.
+    $archivePaths = @($archives | ForEach-Object { $_.FullName })
+    Write-Host "Validating and activating $($archivePaths.Count) app packages as one bundle"
+    & python (Join-Path $RepoPath "tools\haseeb.py") deploy-bundle --root $InstallRoot @archivePaths
+    if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed; successful-run marker not advanced." }
+    # Preserve the exact installed source SHA for trusted PC->GitHub reporting.
+    Write-Host "[HASEEB] Bundle validation and installation PASS. Recording verified release."
+    Set-Content -Path (Join-Path $InstallRoot "last-successful-sha.txt") -Value $trustedSha -Encoding ASCII
+    Set-Content -Path $marker -Value ($runId) -Encoding ASCII
+    Write-Host "Haseeb PC deployment complete for run $($runId)"
+}
+finally {
+    # Delete only this job's downloaded build data. Installed releases are preserved.
+    if (Test-Path $download) { Remove-Item -LiteralPath $download -Recurse -Force }
+}
+) {
+    throw "Cannot verify local script source commit. No deployment attempted."
+}
+
+# Update local source only after successful CI for this exact main SHA.
 & git -C $RepoPath merge --ff-only $trustedSha
 if ($LASTEXITCODE -ne 0) { throw "Local checkout diverged; refusing to overwrite changes." }
+
+if ($executingSourceSha -ne $trustedSha) {
+    # One fresh, bounded invocation loads the new PowerShell script, planner
+    # arguments and other tools as the SAME verified commit. Runner owns the
+    # mutex and transcript; do not start a second scheduled task.
+    if ($AfterSourceRefresh) {
+        throw "Main advanced twice during guarded source refresh. Retry at next scheduled check."
+    }
+    Write-Host "[HASEEB] Source updated. Reloading the verified updater once before deployment."
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -RepoPath $RepoPath -InstallRoot $InstallRoot -AfterSourceRefresh
+    $refreshCode = $LASTEXITCODE
+    if ($refreshCode -ne 0) {
+        throw "Fresh source updater failed (exit code $refreshCode); installed apps preserved."
+    }
+    return
+}
+
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $marker = Join-Path $InstallRoot "last-successful-run.txt"
 if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
