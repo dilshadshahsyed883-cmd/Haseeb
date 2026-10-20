@@ -22,10 +22,17 @@ foreach ($tool in @("git", "gh", "python")) {
     }
 }
 if ($RegisterTask) {
-    $task = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
+    # The runner serializes concurrent invocations and persists per-run logs.
+    # The canonical guarded Sync-Haseeb.ps1 continues to own app updates.
+    $runner = Join-Path $RepoPath "ops\windows\Run-HaseebSync.ps1"
+    if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+        throw "Haseeb system runner not found: $runner"
+    }
+    $task = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $runner + '"'
     & schtasks.exe /Create /F /SC HOURLY /TN "HaseebDesktopSync" /TR $task
-    if ($LASTEXITCODE -ne 0) { throw "Scheduled task creation failed." }
-    Write-Host "HaseebDesktopSync registered hourly. Start it manually once to verify."
+    if ($LASTEXITCODE -ne 0) { throw "Scheduled task registration failed." }
+    Write-Host "HaseebDesktopSync registered hourly with logging and overlap prevention."
+    Write-Host "Check task status with ops\windows\Status-Haseeb.ps1."
     return
 }
 & gh auth status

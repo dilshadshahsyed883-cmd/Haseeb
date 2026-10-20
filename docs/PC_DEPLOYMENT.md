@@ -2,7 +2,7 @@
 
 ## Prerequisites on the Windows PC
 
-1. Change this GitHub repo from PUBLIC to PRIVATE before storing project code or credentials. This is an owner-level GitHub setting, not changed by these scripts.
+1. This Haseeb repository is intentionally PUBLIC at the owner's direction. Store only public-safe source and CI configuration; NEVER commit credentials, tokens, private keys, personal media or user files.
 2. Open a PowerShell terminal, clone the repo, and run `powershell -NoProfile -File .\ops\windows\Bootstrap-Haseeb.ps1 -InstallTools`.
 3. After winget installs, open a NEW PowerShell terminal and re-run the Bootstrap command without `-InstallTools` to check setup.
 4. Run `gh auth login` and follow the GitHub browser/device authorization; use the account with access to Haseeb.
@@ -32,6 +32,30 @@ Only after the first manual sync is confirmed:
     powershell -NoProfile -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Sync-Haseeb.ps1" -RegisterTask
 
 This creates a Windows Scheduled Task named `HaseebDesktopSync`. No public listener, inbound SSH rule, or self-hosted Actions runner is configured by this project.
+
+## Hourly updater system reliability
+
+The owner's existing PC remains the only installation target. The repository
+can stay PUBLIC; the GitHub CLI login stays solely on that Windows PC.
+
+The scheduler invokes `ops/windows/Run-HaseebSync.ps1`, a thin wrapper around
+the exact-main-SHA guarded `Sync-Haseeb.ps1`. It prevents overlapping updater
+runs, writes logs under `%LOCALAPPDATA%\Haseeb\logs\`, and retains up to
+60 log files. No unrelated application or data folders are cleaned.
+
+After the new release is synced, upgrade the already-existing scheduled task once:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Sync-Haseeb.ps1" -RegisterTask
+
+Read installed versions, task's last execution status and next run:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Status-Haseeb.ps1"
+
+For structured local diagnostics append `-Json`.
+
+These system utilities have Windows PowerShell 5.1 self-tests in CI.
+GitHub build PASS does not independently prove unattended Windows installation;
+confirm installed release pointers and task evidence on the PC.
 
 ## New desktop applications
 
