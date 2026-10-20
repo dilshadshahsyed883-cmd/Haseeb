@@ -77,14 +77,35 @@ class Window:
     def build(self):
         tk=self.tk
         self.root.title("Haseeb | Audio Cutter")
-        self.root.geometry("1090x740")
-        self.root.minsize(820,625)
+        # Fit the initial window within the desktop work area. The entire
+        # editor also scrolls when DPI scaling or a remote desktop is smaller.
+        screen_w=self.root.winfo_screenwidth()
+        screen_h=self.root.winfo_screenheight()
+        self.root.geometry(f"{min(1040,max(760,screen_w-100))}x{min(680,max(480,screen_h-140))}")
+        self.root.minsize(760,480)
         self.root.configure(bg=BG)
         header=tk.Frame(self.root,bg=BG,padx=34,pady=24)
         header.pack(fill="x")
         self.label(header,"HASEEB  /  AUDIO CUTTER",22,TEXT,True,BG).pack(anchor="w")
         self.label(header,"Import  ·  Waveform  ·  Precise trim  ·  Preview  ·  Export",10,MUTED,bg=BG).pack(anchor="w",pady=(7,0))
-        body=tk.Frame(self.root,bg=BG,padx=34)
+        # The waveform/settings must never push the export controls below
+        # a small or scaled Windows screen (AnyDesk/RDP included).
+        view=tk.Frame(self.root,bg=BG)
+        view.pack(fill="both",expand=True)
+        self.scroll_view=tk.Canvas(view,bg=BG,highlightthickness=0,bd=0)
+        scrollbar=tk.Scrollbar(view,orient="vertical",command=self.scroll_view.yview)
+        self.scroll_view.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right",fill="y")
+        self.scroll_view.pack(side="left",fill="both",expand=True)
+        self.scroll_content=tk.Frame(self.scroll_view,bg=BG)
+        self.scroll_window=self.scroll_view.create_window((0,0),window=self.scroll_content,anchor="nw")
+        self.scroll_content.bind("<Configure>",lambda event:self.scroll_view.configure(
+            scrollregion=self.scroll_view.bbox("all")))
+        self.scroll_view.bind("<Configure>",lambda event:self.scroll_view.itemconfigure(
+            self.scroll_window,width=event.width))
+        self.root.bind_all("<MouseWheel>",self.on_scroll,add="+")
+
+        body=tk.Frame(self.scroll_content,bg=BG,padx=34)
         body.pack(fill="both",expand=True)
         filebox=self.section(body,"01   SOURCE AUDIO")
         filebox.pack(fill="x")
@@ -144,17 +165,26 @@ class Window:
                        fg=TEXT,activebackground=PANEL,activeforeground=TEXT,
                        selectcolor=SUB,font=("Segoe UI",10)).pack(anchor="w")
         self.label(right,"Original files are never modified.",9,MUTED).pack(anchor="w",pady=(10,0))
-        action=tk.Frame(body,bg=BG)
-        action.pack(fill="x",pady=(15,0))
+        # Keep Preview / Stop / Export fixed and reachable at every height.
+        action=tk.Frame(self.root,bg=BG,padx=34,pady=12)
+        action.pack(side="bottom",fill="x")
         self.button(action,"▶  Preview 30 sec",self.preview).pack(side="left",padx=(0,10))
         self.button(action,"■  Stop",self.stop).pack(side="left")
         self.button(action,"Export selected audio  →",self.save,True).pack(side="right")
-        footer=tk.Frame(self.root,bg=BG,padx=34,pady=16)
+        footer=tk.Frame(self.scroll_content,bg=BG,padx=34,pady=16)
         footer.pack(fill="x")
         tk.Label(footer,textvariable=self.status,bg=BG,fg=MUTED,
                  font=("Segoe UI",10),anchor="w").pack(side="left")
-        self.label(footer,"v1.0.0",9,MUTED,bg=BG).pack(side="right")
+        self.label(footer,"v1.0.1",9,MUTED,bg=BG).pack(side="right")
         self.draw()
+
+    def on_scroll(self,event):
+        """Windows mouse-wheel scroll for the editor, independent of DPI."""
+        if event.delta:
+            lines=-int(event.delta/120)
+            if lines==0:
+                lines=-1 if event.delta>0 else 1
+            self.scroll_view.yview_scroll(lines,"units")
 
     def setstatus(self,text):
         self.status.set(text)
@@ -316,6 +346,7 @@ class Window:
     def close(self):
         try:self.stop()
         except Exception:pass
+        self.root.unbind_all("<MouseWheel>")
         self.root.destroy()
 
 def main():
