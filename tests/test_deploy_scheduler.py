@@ -31,6 +31,15 @@ class FastAutoDeployContracts(unittest.TestCase):
         self.assertIn('Set-Content -Path $marker -Value ($runId)', SYNC)
         self.assertIn('if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed;', SYNC)
 
+    def test_ci_not_ready_fallback_remains_strict(self):
+        self.assertIn('head_sha=$trustedSha&per_page=100', SYNC)
+        self.assertIn('runs?branch=main&per_page=100', SYNC)
+        self.assertIn('Fallback confirmed successful Windows CI for exact main SHA.', SYNC)
+        self.assertGreaterEqual(SYNC.count('$item.head_sha -eq $trustedSha'), 2)
+        self.assertGreaterEqual(SYNC.count('$item.conclusion -eq "success"'), 2)
+        self.assertGreaterEqual(SYNC.count('$item.head_branch -eq "main"'), 2)
+        self.assertGreaterEqual(SYNC.count('$item.status -eq "completed"'), 2)
+
     def test_no_remote_shell_or_network_listener(self):
         self.assertNotIn('sshd', SYNC.lower())
         self.assertNotIn('netsh advfirewall', SYNC.lower())
