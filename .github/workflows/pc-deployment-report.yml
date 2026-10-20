@@ -18,14 +18,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Validate PC report and create Actions summary
-        env:
-          EVENT_PATH: ${{ github.event_path }}
-          SUMMARY_PATH: ${{ github.step_summary }}
         run: |
           python tools/pc_reporter.py export-dispatch \
-            --event-path "$EVENT_PATH" \
+            --event-path "$GITHUB_EVENT_PATH" \
             --output pc-deployment-report.json \
-            --summary "$SUMMARY_PATH"
+            --summary "$GITHUB_STEP_SUMMARY"
       - name: Upload structured PC report
         uses: actions/upload-artifact@v4
         with:
