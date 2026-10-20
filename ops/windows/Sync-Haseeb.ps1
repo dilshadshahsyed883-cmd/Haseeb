@@ -104,26 +104,40 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
     return
 }
 
-# Confirm no app payload/recipe changed since the last installed app source SHA.
-# Unknown or divergent changes always require the original guarded download.
-$installedShaPath = Join-Path $InstallRoot "last-successful-sha.txt"
+# Plan source-only updates even for older Haseeb installs which stored only
+# last-successful-run.txt (not last-successful-sha.txt). A legacy run is
+# resolved through GitHub's verified successful main Windows Build metadata.
+# Installed application release pointers must also be present and valid.
 $planner = Join-Path $RepoPath "tools\release_planner.py"
-if ((Test-Path -LiteralPath $installedShaPath -PathType Leaf) -and
-    (Test-Path -LiteralPath $planner -PathType Leaf)) {
-    $installedSha = (Get-Content -LiteralPath $installedShaPath -Raw).Trim()
-    if ($installedSha -match '^[a-f0-9]{40}$') {
-        & python $planner --repo $RepoPath --previous-sha $installedSha --current-sha $trustedSha
-        $planResult = $LASTEXITCODE
-        if ($planResult -eq 0) {
-            Write-Host "[HASEEB] Source-only build $runId verified against exact main SHA."
-            Write-Host "[HASEEB] No app/package changes. Skipping redundant artifact download."
-            # This marker identifies only the verified source update, NOT installed apps.
-            Set-Content -Path (Join-Path $InstallRoot "last-verified-source-run.txt") -Value $runId -Encoding ASCII
-            return
-        }
-        if ($planResult -ne 10) {
-            throw "Cannot validate release delta. Existing installed apps preserved."
-        }
+$oldShaPath = Join-Path $InstallRoot "last-successful-sha.txt"
+$plannerArgs = @("--repo", $RepoPath, "--install-root", $InstallRoot, "--current-sha", $trustedSha)
+$priorIdentity = $false
+if (Test-Path -LiteralPath $oldShaPath -PathType Leaf) {
+    $oldSha = (Get-Content -LiteralPath $oldShaPath -Raw).Trim()
+    if ($oldSha -match '^[a-f0-9]{40}$') {
+        $plannerArgs += @("--previous-sha", $oldSha)
+        $priorIdentity = $true
+    }
+}
+if ((-not $priorIdentity) -and (Test-Path -LiteralPath $marker -PathType Leaf)) {
+    $previousRun = (Get-Content -LiteralPath $marker -Raw).Trim()
+    if ($previousRun -match '^[0-9]{1,20}$') {
+        Write-Host "[HASEEB] Legacy app release has no SHA marker; verifying installed run through GitHub."
+        $plannerArgs += @("--previous-run-id", $previousRun)
+        $priorIdentity = $true
+    }
+}
+if ($priorIdentity -and (Test-Path -LiteralPath $planner -PathType Leaf)) {
+    & python $planner @plannerArgs
+    $planResult = $LASTEXITCODE
+    if ($planResult -eq 0) {
+        Write-Host "[HASEEB] No app/package changes. Skipping redundant artifact download."
+        # Not a new app installation: preserve the last installed bundle run.
+        Set-Content -Path (Join-Path $InstallRoot "last-verified-source-run.txt") -Value $runId -Encoding ASCII
+        return
+    }
+    if ($planResult -ne 10) {
+        throw "Release planner error. Existing installed apps preserved."
     }
 }
 # A unique attempt directory avoids GH CLI overwrite prompts when an earlier
