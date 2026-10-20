@@ -1,0 +1,6 @@
+Haseeb Audio Cutter decodes, previews, and exports audio using FFmpeg.
+The trusted GitHub Windows build bundles an FFmpeg executable provided by
+imageio-ffmpeg. Source: https://github.com/imageio/imageio-ffmpeg
+FFmpeg source and license guidance: https://ffmpeg.org/ and https://ffmpeg.org/legal.html
+This ZIP also contains FFMPEG_LICENSE.txt generated from ffmpeg -L.
+The executable is included only in release artifacts, not committed as GitHub source.
