@@ -36,34 +36,44 @@ if ($LASTEXITCODE -ne 0) { throw "Cannot fetch origin/main" }
 $trustedSha = (& git -C $RepoPath rev-parse FETCH_HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $trustedSha -notmatch '^[a-f0-9]{40}$') { throw "Bad main commit SHA" }
 
-$json = & gh run list --repo $RepoName --workflow build-windows.yml --branch main --status success --json databaseId,headSha,event --limit 20
-if ($LASTEXITCODE -ne 0) { throw "Cannot read workflow runs" }
-$runs = @($json | ConvertFrom-Json)
+# Use GitHub's workflow-run REST endpoint to find a successful artifact by SHA.
+# Never use an unrelated PR run or an older release, even after a stale cache hit.
+$endpoint = "repos/$RepoName/actions/workflows/build-windows.yml/runs?branch=main&head_sha=$trustedSha&per_page=100"
+$json = & gh api --method GET -H "Accept: application/vnd.github+json" $endpoint
+if ($LASTEXITCODE -ne 0) { throw "Cannot query GitHub Windows Build workflow runs. No deployment attempted." }
+$response = ($json -join "`n") | ConvertFrom-Json
+$runs = @($response.workflow_runs)
 $run = $null
 foreach ($item in $runs) {
-    if ($item.headSha -eq $trustedSha -and $item.event -in @("push", "workflow_dispatch")) {
+    if ($item.head_sha -eq $trustedSha -and
+        $item.head_branch -eq "main" -and
+        $item.status -eq "completed" -and
+        $item.conclusion -eq "success" -and
+        $item.event -in @("push", "workflow_dispatch")) {
         $run = $item
         break
     }
 }
 if (-not $run) {
-    throw "No successful main-branch CI build for current SHA $trustedSha. No deployment attempted."
+    throw "No successful Haseeb Windows Build CI run matched current main SHA $trustedSha (API returned $($runs.Count) runs). No deployment attempted."
 }
-Write-Host "Verified successful build: run $($run.databaseId), SHA $trustedSha"
+$runId = [string]$run.id
+if ($runId -notmatch '^[0-9]+$') { throw "Invalid build run ID. No deployment attempted." }
+Write-Host "Verified successful build: run $runId, SHA $trustedSha"
 
 # Update the local script source only after successful CI for the exact main SHA.
 & git -C $RepoPath merge --ff-only $trustedSha
 if ($LASTEXITCODE -ne 0) { throw "Local checkout diverged; refusing to overwrite changes." }
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $marker = Join-Path $InstallRoot "last-successful-run.txt"
-if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq [string]$run.databaseId)) {
-    Write-Host "Already deployed run $($run.databaseId). No download needed."
+if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
+    Write-Host "Already deployed run $($runId). No download needed."
     return
 }
-$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $run.databaseId)
+$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId)
 New-Item -ItemType Directory -Path $download -Force | Out-Null
 try {
-    & gh run download $run.databaseId --repo $RepoName --name haseeb-windows-bundle --dir $download
+    & gh run download $runId --repo $RepoName --name haseeb-windows-bundle --dir $download
     if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
     $archives = @(Get-ChildItem -Path $download -Filter "*.zip" -File)
     if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
@@ -72,8 +82,8 @@ try {
         & python (Join-Path $RepoPath "tools\haseeb.py") deploy $archive.FullName --root $InstallRoot
         if ($LASTEXITCODE -ne 0) { throw "Deployment stopped; existing app pointer unchanged." }
     }
-    Set-Content -Path $marker -Value ([string]$run.databaseId) -Encoding ASCII
-    Write-Host "Haseeb PC deployment complete for run $($run.databaseId)"
+    Set-Content -Path $marker -Value ($runId) -Encoding ASCII
+    Write-Host "Haseeb PC deployment complete for run $($runId)"
 }
 finally {
     # Delete only this job's downloaded build data. Installed releases are preserved.

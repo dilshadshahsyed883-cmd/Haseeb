@@ -20,6 +20,28 @@ jobs:
           python-version: "3.11"
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Verify CI selector against real successful main run
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "dilshadshahsyed883-cmd/Haseeb"
+          $currentSha = (& gh api --method GET "repos/$repo/branches/main" --jq ".commit.sha").Trim()
+          if ($LASTEXITCODE -ne 0 -or $currentSha -notmatch '^[a-f0-9]{40}$') { throw "Cannot read trusted main SHA" }
+          $uri = "repos/$repo/actions/workflows/build-windows.yml/runs?branch=main&head_sha=$currentSha&per_page=100"
+          $output = & gh api --method GET -H "Accept: application/vnd.github+json" $uri
+          if ($LASTEXITCODE -ne 0) { throw "CI run REST query failed" }
+          $runs = @( (($output -join "`n") | ConvertFrom-Json).workflow_runs )
+          $match = @($runs | Where-Object {
+            $_.head_sha -eq $currentSha -and
+            $_.head_branch -eq "main" -and
+            $_.conclusion -eq "success" -and
+            $_.status -eq "completed" -and
+            $_.event -in @("push", "workflow_dispatch")
+          })
+          if ($match.Count -eq 0) { throw "API did not locate matching successful main run $currentSha" }
+          Write-Host "PASS: exact SHA GitHub CI lookup returned $($match.Count) trusted successful main runs"
       - name: Validate app manifests
         run: python tools/haseeb.py validate
       - name: Desktop app headless smoke test
