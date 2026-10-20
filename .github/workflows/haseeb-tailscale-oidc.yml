@@ -1,0 +1,60 @@
+name: Haseeb Tailscale OIDC Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/haseeb-tailscale-oidc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: haseeb-tailscale-oidc-main
+  cancel-in-progress: false
+
+jobs:
+  tailscale-oidc-check:
+    name: Federated identity and tailnet check
+    if: github.repository == 'dilshadshahsyed883-cmd/Haseeb' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: haseeb-pc
+    steps:
+      - name: Connect ephemeral Haseeb CI node
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:haseeb-ci
+          version: latest
+
+      - name: Verify node is online (no target-side commands)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale status --json | python3 -c '
+          import json, sys
+          status = json.load(sys.stdin)
+          if not status.get("Self", {}).get("Online", False):
+              raise SystemExit("Haseeb runner is not online in Tailscale")
+          print("Haseeb CI federated login OK; ephemeral runner is online")
+          '
+
+      - name: Optional private Haseeb PC connectivity check
+        shell: bash
+        env:
+          HASEEB_PC_IP: ${{ vars.HASEEB_PC_TAILSCALE_IP }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HASEEB_PC_IP}" ]]; then
+            echo "PC peer check skipped; set haseeb-pc environment variable HASEEB_PC_TAILSCALE_IP to opt in."
+            exit 0
+          fi
+          if timeout 35s tailscale ping -c 1 --timeout 20s "${HASEEB_PC_IP}" >/dev/null 2>&1; then
+            echo "Haseeb PC Tailscale ping succeeded."
+          else
+            echo "::warning::Haseeb PC peer ping failed or ACL disallows it. No PC commands were executed."
+          fi
