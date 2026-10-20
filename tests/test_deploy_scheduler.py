@@ -40,6 +40,15 @@ class FastAutoDeployContracts(unittest.TestCase):
         self.assertGreaterEqual(SYNC.count('$item.head_branch -eq "main"'), 2)
         self.assertGreaterEqual(SYNC.count('$item.status -eq "completed"'), 2)
 
+    def test_guarded_download_has_visible_milestones_and_timeout(self):
+        self.assertIn('tools\\download_artifact.py', SYNC)
+        self.assertIn('--timeout-seconds 600', SYNC)
+        self.assertIn('[HASEEB] Download phase: starting guarded release artifact fetch.', SYNC)
+        self.assertIn('Download phase PASS.', SYNC)
+        self.assertIn('Bundle validation and installation PASS.', SYNC)
+        self.assertIn('[guid]::NewGuid().ToString("N")', SYNC)
+        self.assertIn('if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }', SYNC)
+
     def test_no_remote_shell_or_network_listener(self):
         self.assertNotIn('sshd', SYNC.lower())
         self.assertNotIn('netsh advfirewall', SYNC.lower())

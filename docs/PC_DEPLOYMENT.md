@@ -119,3 +119,26 @@ PC-only diagnostics continue in `%LOCALAPPDATA%\Haseeb\logs`.
 View remote status in repository Actions -> `Haseeb PC Deployment Feedback`.
 No report will appear until a real PC installation or a meaningful updater failure
 occurs after the updated runner is loaded. GitHub CI PASS by itself is not PC deployment PASS.
+
+
+## Artifact download diagnostics and stall recovery (system-only)
+
+The updater uses `tools/download_artifact.py` to download the exact successful
+main-build artifact into a new per-attempt directory. It records download start,
+30-second heartbeat messages and completion in the existing scheduled transcript
+under `%LOCALAPPDATA%\Haseeb\logs\sync-*.log`.
+The GitHub CLI's raw output remains **PC-local** in
+`%LOCALAPPDATA%\Haseeb\logs\artifact-*.log` and is never uploaded.
+
+Downloads have a 600-second timeout and no interactive stdin (no hidden
+overwrite prompts). A timeout or GitHub CLI failure leaves installed apps and
+their successful release marker unchanged, reports a sanitized artifact error,
+and allows the following scheduled task check to retry. New attempts do not reuse
+any incomplete prior download directory. Archive companions, SHA-256, application
+self-tests, atomic pointer rollback and SHA build selection remain mandatory.
+A slow download may span multiple 2-minute check intervals; the single-instance
+runner prevents overlapping deployments.
+
+A successful Git checkout or "Already up to date" does not mean an app is
+installed. Verify `last-successful-run.txt` equals the expected GitHub Actions
+build run ID, or obtain the matching successful PC feedback event.

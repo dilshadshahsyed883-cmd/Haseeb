@@ -103,13 +103,16 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
     Write-Host "Already deployed run $($runId). No download needed."
     return
 }
-$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId)
-New-Item -ItemType Directory -Path $download -Force | Out-Null
+# A unique attempt directory avoids GH CLI overwrite prompts when an earlier
+# scheduled task was interrupted mid-download.
+$download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId + "-" + [guid]::NewGuid().ToString("N"))
 try {
-    & gh run download $runId --repo $RepoName --name haseeb-windows-bundle --dir $download
+    Write-Host "[HASEEB] Download phase: starting guarded release artifact fetch."
+    & python (Join-Path $RepoPath "tools\download_artifact.py") --run-id $runId --dir $download --timeout-seconds 600
     if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
-    $archives = @(Get-ChildItem -Path $download -Filter "*.zip" -File)
+    $archives = @(Get-ChildItem -LiteralPath $download -Filter "*.zip" -File)
     if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
+    Write-Host "[HASEEB] Download phase PASS. Starting checksum and bundled app smoke tests."
     # All app ZIPs must pass checksum + self-test before ANY active app is switched.
     # If a later app fails, previous installed app pointers stay unchanged.
     $archivePaths = @($archives | ForEach-Object { $_.FullName })
@@ -117,6 +120,7 @@ try {
     & python (Join-Path $RepoPath "tools\haseeb.py") deploy-bundle --root $InstallRoot @archivePaths
     if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed; successful-run marker not advanced." }
     # Preserve the exact installed source SHA for trusted PC->GitHub reporting.
+    Write-Host "[HASEEB] Bundle validation and installation PASS. Recording verified release."
     Set-Content -Path (Join-Path $InstallRoot "last-successful-sha.txt") -Value $trustedSha -Encoding ASCII
     Set-Content -Path $marker -Value ($runId) -Encoding ASCII
     Write-Host "Haseeb PC deployment complete for run $($runId)"
