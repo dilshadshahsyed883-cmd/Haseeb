@@ -33,6 +33,23 @@ Only after the first manual sync is confirmed:
 
 This registers the existing Windows Scheduled Task named `HaseebDesktopSync` to check GitHub every **2 minutes**, rather than hourly. On a matching successful `main` Windows Build, it downloads and activates the validated bundle automatically. The PC must be awake and connected to the internet; a build ready just after a check waits until the next check (usually within about 2 minutes), plus normal download/install time. This is fast periodic polling, **not an instantaneous GitHub push**. No public listener, inbound SSH rule, or self-hosted Actions runner is configured.
 
+## Updater reload when a verified main commit changes
+
+Windows PowerShell keeps its already-parsed script in memory even if Git
+fast-forwards its file during that same invocation. This formerly allowed
+the old updater to call a newer release-planner CLI without required flags
+(for example `--install-root`). The updater now records the local script's
+starting SHA, fast-forwards only after verifying successful exact-main CI,
+and, if the SHA changed, starts **one** child PowerShell process loading
+the newly checked-out updater. The original job waits for that child
+to finish; the existing Scheduled Task runner still owns the mutex and
+log, and no second scheduled task is started. A second unexpected
+source change during that reload fails safely for the next periodic check.
+
+No manual trigger is needed when this feature is installed. Source-only
+releases still skip binary downloads only after planner and installed
+release checks pass. No application data or installed release is deleted.
+
 ## Source-only update fast path (no unnecessary application download)
 
 A successful GitHub Windows Build on `main` is ALWAYS verified against

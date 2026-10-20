@@ -8,7 +8,8 @@
 param(
     [string]$RepoPath = (Join-Path $env:LOCALAPPDATA "Haseeb\repo"),
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Haseeb\installed"),
-    [switch]$RegisterTask
+    [switch]$RegisterTask,
+    [switch]$AfterSourceRefresh
 )
 $ErrorActionPreference = "Stop"
 $RepoName = "dilshadshahsyed883-cmd/Haseeb"
@@ -94,9 +95,29 @@ $runId = [string]$run.id
 if ($runId -notmatch '^[0-9]+$') { throw "Invalid build run ID. No deployment attempted." }
 Write-Host "Verified successful build: run $runId, SHA $trustedSha"
 
-# Update the local script source only after successful CI for the exact main SHA.
+# Capture which source version this running PowerShell process parsed.
+$executingSourceSha = (& git -C $RepoPath rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $executingSourceSha -notmatch '^[a-f0-9]{40}$') {
+    throw "Cannot verify local script source commit. No deployment attempted."
+}
+
+# Update local source only after successful CI for this exact main SHA.
 & git -C $RepoPath merge --ff-only $trustedSha
 if ($LASTEXITCODE -ne 0) { throw "Local checkout diverged; refusing to overwrite changes." }
+
+if ($executingSourceSha -ne $trustedSha) {
+    # Reload new code once: old PowerShell process keeps its parsed script
+    # even if Git changes the file. The scheduled runner retains its mutex.
+    if ($AfterSourceRefresh) {
+        throw "Main advanced during source refresh. Retry at next scheduled check."
+    }
+    Write-Host "[HASEEB] Source changed. Reloading updater in a fresh process before deployment."
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -RepoPath $RepoPath -InstallRoot $InstallRoot -AfterSourceRefresh
+    $freshExit = $LASTEXITCODE
+    if ($freshExit -ne 0) { throw "Fresh updater failed (exit code $freshExit); installed apps preserved." }
+    return
+}
+
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $marker = Join-Path $InstallRoot "last-successful-run.txt"
 if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
