@@ -73,6 +73,18 @@ class ReleasePlannerTests(unittest.TestCase):
         self.assertFalse(source_only_update(self.repo, "missing", current))
         self.assertFalse(source_only_update(self.repo, current, self.base))
 
+    def test_windows_updater_keeps_app_install_marker_separate(self):
+        base = Path(__file__).resolve().parents[1]
+        sync = (base / "ops/windows/Sync-Haseeb.ps1").read_text(encoding="utf-8")
+        status = (base / "ops/windows/Status-Haseeb.ps1").read_text(encoding="utf-8")
+        self.assertIn("tools\\release_planner.py", sync)
+        self.assertIn('last-successful-sha.txt', sync)
+        self.assertIn('last-verified-source-run.txt', sync)
+        self.assertIn('last-successful-run.txt', status)
+        self.assertIn('last_verified_source_run', status)
+        self.assertIn('if ($planResult -eq 0)', sync)
+        self.assertIn('if ($planResult -ne 10)', sync)
+
     def test_mixed_system_and_app_diff_never_skips(self):
         self.write("docs/PC_DEPLOYMENT.md", "changed docs")
         self.write("apps/audio_cutter/main.py", "changed app")
