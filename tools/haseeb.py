@@ -136,37 +136,109 @@ def pointer(root, slug, which="current"):
     return obj
 
 
-def deploy(root, archive):
+def _restore_pointer_files(snapshots):
+    """Restore on-disk current/previous pointer bytes if activation fails."""
+    errors = []
+    for target, original in snapshots.items():
+        try:
+            if original is None:
+                target.unlink(missing_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as f:
+                temporary = Path(f.name)
+                f.write(original)
+            try:
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            errors.append(str(error))
+    if errors:
+        raise RuntimeError("Deployment failed; pointer restoration incomplete: " +
+                           "; ".join(errors))
+
+
+def deploy_bundle(root, archives):
+    """Validate *every* app, then activate the bundle with rollback on failure.
+
+    All SHA-256 companions and app self-tests run before changing active
+    release pointers. If a pointer update fails, restore original pointer
+    bytes and retain current releases. No existing app files are removed.
+    """
     root = root.resolve()
-    archive = archive.resolve()
-    digest = checksum(archive)
+    archives = [Path(item).resolve() for item in archives]
+    if not archives:
+        raise ValueError("Bundle has no application ZIPs")
     releases = root / "releases"
     releases.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=releases))
+    staged = []
+    planned = []
+    slugs = set()
+    snapshots = {}
     try:
-        extract(archive, stage)
-        spec = manifest(stage)
-        slug = spec["id"]
-        dest = releases / slug / (spec["version"] + "-" + digest[:12])
-        smoke = subprocess.run(
-            [sys.executable, str(stage / spec["entry_point"]), "--self-test"],
-            cwd=stage, capture_output=True, text=True, timeout=40)
-        if smoke.returncode:
-            raise RuntimeError("Smoke test failed: " + smoke.stderr[-1200:])
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if not dest.exists():
-            stage.rename(dest)
-        record = {"app_id": slug, "version": spec["version"],
-                  "release": dest.relative_to(root).as_posix(), "sha256": digest}
-        active = pointer(root, slug)
-        if active != record:
-            if active:
-                save(root / "apps" / slug / "previous.json", active)
-            save(root / "apps" / slug / "current.json", record)
-        return record
+        for archive in archives:
+            digest = checksum(archive)
+            stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=releases))
+            staged.append(stage)
+            extract(archive, stage)
+            spec = manifest(stage)
+            slug = spec["id"]
+            if slug in slugs:
+                raise ValueError("Duplicate application in bundle: " + slug)
+            slugs.add(slug)
+
+            smoke = subprocess.run(
+                [sys.executable, str(stage / spec["entry_point"]), "--self-test"],
+                cwd=stage, capture_output=True, text=True, timeout=40)
+            if smoke.returncode:
+                raise RuntimeError("Smoke test failed for " + slug + ": " +
+                                   smoke.stderr[-1200:])
+
+            destination = releases / slug / (spec["version"] + "-" + digest[:12])
+            record = {"app_id": slug, "version": spec["version"],
+                      "release": destination.relative_to(root).as_posix(),
+                      "sha256": digest}
+            # Validate existing pointer before modifying anything.
+            pointer(root, slug)
+            planned.append((stage, destination, slug, record))
+
+        # Extracted releases are immutable. Their existence alone never
+        # activates an app; activation happens through pointers below.
+        for stage, destination, slug, record in planned:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.exists():
+                stage.rename(destination)
+
+        for stage, destination, slug, record in planned:
+            directory = root / "apps" / slug
+            for filename in ("current.json", "previous.json"):
+                target = directory / filename
+                snapshots[target] = target.read_bytes() if target.exists() else None
+
+        try:
+            for stage, destination, slug, record in planned:
+                active = pointer(root, slug)
+                if active != record:
+                    if active:
+                        save(root / "apps" / slug / "previous.json", active)
+                    save(root / "apps" / slug / "current.json", record)
+        except Exception as activation_error:
+            try:
+                _restore_pointer_files(snapshots)
+            except RuntimeError as recovery_error:
+                raise RuntimeError(str(recovery_error)) from activation_error
+            raise
+        return [record for _, _, _, record in planned]
     finally:
-        if stage.exists():
-            shutil.rmtree(stage)
+        for stage in staged:
+            if stage.exists():
+                shutil.rmtree(stage)
+
+
+def deploy(root, archive):
+    """Backward-compatible one-archive deployment."""
+    return deploy_bundle(root, [archive])[0]
 
 
 def rollback(root, slug):
@@ -194,6 +266,9 @@ def main():
     install = cmd.add_parser("deploy")
     install.add_argument("archive", type=Path)
     install.add_argument("--root", type=Path, required=True)
+    batch = cmd.add_parser("deploy-bundle")
+    batch.add_argument("archives", nargs="+", type=Path)
+    batch.add_argument("--root", type=Path, required=True)
     revert = cmd.add_parser("rollback")
     revert.add_argument("app_id")
     revert.add_argument("--root", type=Path, required=True)
@@ -206,6 +281,8 @@ def main():
         print("\n".join(map(str, package(arg.apps, arg.out))))
     elif arg.cmd == "deploy":
         print(json.dumps(deploy(arg.root, arg.archive), indent=2))
+    elif arg.cmd == "deploy-bundle":
+        print(json.dumps(deploy_bundle(arg.root, arg.archives), indent=2))
     elif arg.cmd == "rollback":
         print(json.dumps(rollback(arg.root, arg.app_id), indent=2))
     else:
