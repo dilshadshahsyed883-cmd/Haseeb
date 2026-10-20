@@ -1,5 +1,6 @@
 """Deterministic local tests for Haseeb PC feedback (no GitHub network calls)."""
 import json
+import warnings
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -64,6 +65,13 @@ class PCFeedbackTests(unittest.TestCase):
             report.validate_report(payload)
         with self.assertRaises(ValueError):
             report.create_report("failure", "install", "INSTALL_FAILED", run_id="../../secrets")
+
+    def test_reporter_compiles_without_python_syntax_warnings(self):
+        source_path = Path(report.__file__)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            compile(source_path.read_text(encoding="utf-8"),
+                    str(source_path), "exec")
 
     def test_summary_contains_only_allowlisted_values(self):
         payload = report.create_report("failure", "install", "INSTALL_FAILED", "a" * 40, "42")

@@ -162,10 +162,10 @@ def render_summary(report):
         f"| Result | {report['status']} |\n"
         f"| Stage | {report['stage']} |\n"
         f"| Code | {report['error_code']} |\n"
-        f"| Git commit | \`{report['commit_sha'] or 'unavailable'}\` |\n"
-        f"| Build run | \`{report['run_id'] or 'unavailable'}\` |\n"
+        f"| Git commit | `{report['commit_sha'] or 'unavailable'}` |\n"
+        f"| Build run | `{report['run_id'] or 'unavailable'}` |\n"
         f"| Reported UTC | {report['created_utc']} |\n"
-        f"| Event ID | \`{report['event_id']}\` |\n\n"
+        f"| Event ID | `{report['event_id']}` |\n\n"
         "No PC log text, file paths, media, hostnames or credentials are transmitted.\n"
     )
 
