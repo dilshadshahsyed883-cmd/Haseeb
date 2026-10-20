@@ -84,11 +84,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
     $archives = @(Get-ChildItem -Path $download -Filter "*.zip" -File)
     if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
-    foreach ($archive in $archives) {
-        Write-Host "Deploying $($archive.Name)"
-        & python (Join-Path $RepoPath "tools\haseeb.py") deploy $archive.FullName --root $InstallRoot
-        if ($LASTEXITCODE -ne 0) { throw "Deployment stopped; existing app pointer unchanged." }
-    }
+    # All app ZIPs must pass checksum + self-test before ANY active app is switched.
+    # If a later app fails, previous installed app pointers stay unchanged.
+    $archivePaths = @($archives | ForEach-Object { $_.FullName })
+    Write-Host "Validating and activating $($archivePaths.Count) app packages as one bundle"
+    & python (Join-Path $RepoPath "tools\haseeb.py") deploy-bundle --root $InstallRoot @archivePaths
+    if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed; successful-run marker not advanced." }
     Set-Content -Path $marker -Value ($runId) -Encoding ASCII
     Write-Host "Haseeb PC deployment complete for run $($runId)"
 }
