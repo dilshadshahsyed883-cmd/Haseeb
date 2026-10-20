@@ -65,7 +65,30 @@ foreach ($item in $runs) {
     }
 }
 if (-not $run) {
-    throw "No successful Haseeb Windows Build CI run matched current main SHA $trustedSha (API returned $($runs.Count) runs). No deployment attempted."
+    # Read-only fallback when GitHub's combined branch and head_sha API filters
+    # return empty unexpectedly. Never lower release-identity requirements.
+    Write-Host "Exact-SHA query returned no completed successful build; checking recent main workflow runs."
+    $fallbackEndpoint = "repos/$RepoName/actions/workflows/build-windows.yml/runs?branch=main&per_page=100"
+    $fallbackJson = & gh api --method GET -H "Accept: application/vnd.github+json" $fallbackEndpoint
+    if ($LASTEXITCODE -ne 0) {
+        throw "Cannot query GitHub Windows Build fallback workflow runs. No deployment attempted."
+    }
+    $fallbackResponse = ($fallbackJson -join [Environment]::NewLine) | ConvertFrom-Json
+    $fallbackRuns = @($fallbackResponse.workflow_runs)
+    foreach ($item in $fallbackRuns) {
+        if ($item.head_sha -eq $trustedSha -and
+            $item.head_branch -eq "main" -and
+            $item.status -eq "completed" -and
+            $item.conclusion -eq "success" -and
+            $item.event -in @("push", "workflow_dispatch")) {
+            $run = $item
+            Write-Host "Fallback confirmed successful Windows CI for exact main SHA."
+            break
+        }
+    }
+}
+if (-not $run) {
+    throw "No successful Haseeb Windows Build CI run matched current main SHA $trustedSha (including recent-build fallback). No deployment attempted."
 }
 $runId = [string]$run.id
 if ($runId -notmatch '^[0-9]+$') { throw "Invalid build run ID. No deployment attempted." }
