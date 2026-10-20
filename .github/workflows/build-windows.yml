@@ -42,6 +42,13 @@ jobs:
           })
           if ($match.Count -eq 0) { throw "API did not locate matching successful main run $currentSha" }
           Write-Host "PASS: exact SHA GitHub CI lookup returned $($match.Count) trusted successful main runs"
+      - name: Haseeb deployment system health and runner tests
+        shell: powershell
+        run: |
+          & ".\ops\windows\Run-HaseebSync.ps1" -SelfTest
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Updater runner self-test failed" }
+          & ".\ops\windows\Status-Haseeb.ps1" -SelfTest
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Deployment status self-test failed" }
       - name: Validate app manifests
         run: python tools/haseeb.py validate
       - name: Desktop app headless smoke test
