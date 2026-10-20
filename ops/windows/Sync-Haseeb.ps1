@@ -28,7 +28,7 @@ if ($RegisterTask) {
     Write-Host "HaseebDesktopSync registered hourly. Start it manually once to verify."
     return
 }
-& gh auth status 2>&1 | Out-Null
+& gh auth status
 if ($LASTEXITCODE -ne 0) { throw "GitHub CLI is not authenticated: gh auth login" }
 
 & git -C $RepoPath fetch --no-tags origin main
@@ -54,15 +54,28 @@ Write-Host "Verified successful build: run $($run.databaseId), SHA $trustedSha"
 # Update the local script source only after successful CI for the exact main SHA.
 & git -C $RepoPath merge --ff-only $trustedSha
 if ($LASTEXITCODE -ne 0) { throw "Local checkout diverged; refusing to overwrite changes." }
+New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+$marker = Join-Path $InstallRoot "last-successful-run.txt"
+if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq [string]$run.databaseId)) {
+    Write-Host "Already deployed run $($run.databaseId). No download needed."
+    return
+}
 $download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $run.databaseId)
 New-Item -ItemType Directory -Path $download -Force | Out-Null
-& gh run download $run.databaseId --repo $RepoName --name haseeb-windows-bundle --dir $download
-if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
-$archives = @(Get-ChildItem -Path $download -Filter "*.zip" -File)
-if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
-foreach ($archive in $archives) {
-    Write-Host "Deploying $($archive.Name)"
-    & python (Join-Path $RepoPath "tools\haseeb.py") deploy $archive.FullName --root $InstallRoot
-    if ($LASTEXITCODE -ne 0) { throw "Deployment stopped; existing app pointer unchanged." }
+try {
+    & gh run download $run.databaseId --repo $RepoName --name haseeb-windows-bundle --dir $download
+    if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }
+    $archives = @(Get-ChildItem -Path $download -Filter "*.zip" -File)
+    if ($archives.Count -eq 0) { throw "Downloaded build contained no application ZIPs." }
+    foreach ($archive in $archives) {
+        Write-Host "Deploying $($archive.Name)"
+        & python (Join-Path $RepoPath "tools\haseeb.py") deploy $archive.FullName --root $InstallRoot
+        if ($LASTEXITCODE -ne 0) { throw "Deployment stopped; existing app pointer unchanged." }
+    }
+    Set-Content -Path $marker -Value ([string]$run.databaseId) -Encoding ASCII
+    Write-Host "Haseeb PC deployment complete for run $($run.databaseId)"
 }
-Write-Host "Haseeb PC deployment complete for run $($run.databaseId)"
+finally {
+    # Delete only this job's downloaded build data. Installed releases are preserved.
+    if (Test-Path $download) { Remove-Item -LiteralPath $download -Recurse -Force }
+}

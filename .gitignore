@@ -218,3 +218,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Haseeb local credentials, releases and downloaded artifacts
+rclone.conf
+*.pfx
+*.p12
+*.pem
+*.key
+*client_secret*.json
+*token*.json
+*credentials*.json
+config.local.json
+.local/
+installed/
+outputs/
+data/
+*.sqlite
+*.sqlite3
