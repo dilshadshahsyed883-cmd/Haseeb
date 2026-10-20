@@ -89,3 +89,33 @@ Place each app in `apps/<folder>/` with `app.json`: `id` (lowercase hyphen slug)
 ## Deployment boundaries
 
 User credentials stay on PC: use `gh auth login`, `tailscale up` and `rclone config` interactively. Avoid printing tokens, putting them in PowerShell files, or making a public repo self-hosted runner. Local installs are under `%LOCALAPPDATA%\Haseeb\installed`; the script will not touch other PC or VPS applications. Current implementation requires Python on the PC, not a compiled exe.
+
+
+## PC -> GitHub deployment feedback (two-way reporting)
+
+After this feature is merged into main and the scheduled updater has fetched the new scripts,
+the existing `HaseebDesktopSync` task also sends deployment outcomes back to GitHub.
+No new open ports, self-hosted runner, SSH service, secrets, or separate Windows service are needed.
+
+- PC install success: the runner records the successfully installed GitHub run ID and,
+  for new releases, the exact installed main commit SHA.
+- PC install/update failure: only a predefined stage and error code are reported.
+  Raw PowerShell transcripts, exception text, usernames, hostnames, filesystem paths,
+  credentials and all app/owner data stay on the PC.
+- Feedback sends through authenticated `gh api` `repository_dispatch`.
+  GitHub's `Haseeb PC Deployment Feedback` Actions workflow validates the fixed schema,
+  shows a run summary, and stores a JSON artifact for 30 days.
+- With a public repository, these status-only reports are public. Do **not** enable
+  uploading local logs or private diagnostics to this workflow.
+- Offline, unauthenticated and transient API failures leave JSON reports in
+  `%LOCALAPPDATA%\Haseeb\reports\pending` to retry on the next updater check.
+  Successfully delivered records move to `...\reports\sent`.
+- Duplicate success reports are suppressed by installed run ID; repeated identical
+  failures are capped to one per date/commit/stage/reason. No-change checks send nothing.
+- Reporting is best-effort and cannot block the guarded installer or automatic rollback.
+  A GitHub report means **the PC agent reported** success, not independent remote verification.
+
+PC-only diagnostics continue in `%LOCALAPPDATA%\Haseeb\logs`.
+View remote status in repository Actions -> `Haseeb PC Deployment Feedback`.
+No report will appear until a real PC installation or a meaningful updater failure
+occurs after the updated runner is loaded. GitHub CI PASS by itself is not PC deployment PASS.
