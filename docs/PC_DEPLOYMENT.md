@@ -48,8 +48,15 @@ Allowed safe changes include `ops/windows/`, `docs/`, `tests/`,
 files. ANY change under `apps/`, to the package builder
 `tools/haseeb.py`, the FFmpeg packager, the Windows build workflow or an
 unknown path still REQUIRES the full bundle download, checksum checks,
-smoke tests and guarded activation. Unknown, missing or divergent
-previous commit SHA cannot skip the bundle.
+smoke tests and guarded activation. Unknown or divergent prior identity cannot skip the bundle. For older PC
+installs where only `last-successful-run.txt` exists (no historical
+`last-successful-sha.txt`), the updater reads that run ID from the local
+installed marker, obtains its exact commit SHA via GitHub's read-only
+Actions run endpoint, and accepts it ONLY if it was completed/successful
+on this repository's main branch using the correct Windows build workflow.
+It also verifies that all installed application release pointers and manifests
+are intact before using the source-only shortcut. Missing/unverifiable run
+metadata or missing installed files still requires the guarded full bundle.
 
 The `last-successful-run.txt` marker continues to mean the last
 **actually installed app bundle**, never merely a successful source
