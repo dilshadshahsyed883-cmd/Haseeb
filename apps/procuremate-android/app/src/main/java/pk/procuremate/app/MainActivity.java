@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private int active=0, pdfPage=0;
     private PdfRenderer pdf;
     private StringBuilder pdfText;
+    private ArrayList<GeometryBoqParser.Cell> pdfCells;
     private final String[] cities={"Lahore","Faisalabad","Gujranwala"};
     private final String[] catalog={"Household & Kitchen","Cleaning & Janitorial","Stationery & Paper","Electrical & Lighting","Textiles & Uniforms","Bedding & Mattresses","Packaging & Plastic","Home Bedding & Textiles","Hospital Bedding & Textiles","Hardware & Tools","Plumbing & Sanitary","Computers & IT","Printing & Toners","Office Furniture","Food & Refreshments","Sports & Recreation","Industrial Machinery","Other"};
     private final Set<String> selected=new LinkedHashSet<>();
@@ -79,6 +80,7 @@ public class MainActivity extends Activity {
         LinearLayout header=col();header.setBackgroundColor(NAVY);header.setPadding(dp(18),dp(17),dp(18),dp(13));
         header.addView(text("ProcureMate Pakistan",23,Color.WHITE,true));
         header.addView(text("Tender-to-supplier assistant  •  Android beta",12,Color.rgb(199,222,233),false));
+        header.addView(text("Made by Bilal",12,Color.rgb(199,222,233),true));
         root.addView(header);
         ScrollView scroll=new ScrollView(this);content=col();content.setPadding(dp(13),dp(15),dp(13),dp(8));
         scroll.addView(content);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
@@ -141,6 +143,7 @@ public class MainActivity extends Activity {
             LinearLayout c=card();c.addView(text((i+1)+". "+s(j,"name"),17,NAVY,true));
             c.addView(text(s(j,"qty")+" "+s(j,"unit")+"   ·   "+s(j,"category"),13,TEAL,true));
             c.addView(text(s(j,"spec"),13,GRAY,false));
+            if(j.optBoolean("review",false))c.addView(text("Needs review: verify this row, quantity and unit against the tender",12,Color.rgb(165,87,19),true));
             if(!s(j,"source").isEmpty())c.addView(text("Source: "+s(j,"source"),11,GRAY,false));
             LinearLayout row=actions(c);
             action(row,"Edit",()->editItem(idx));
@@ -165,7 +168,9 @@ public class MainActivity extends Activity {
             JSONObject j=old==null?new JSONObject():old;
             try{j.put("name",name.getText().toString().trim());j.put("spec",spec.getText().toString().trim());
                 j.put("qty",qty.getText().toString().trim());j.put("unit",unit.getText().toString().trim());
-                j.put("category",category.getText().toString().trim());if(old==null)j.put("source","Manual entry");
+                j.put("category",category.getText().toString().trim());
+                j.put("review",qty.getText().toString().trim().isEmpty()||unit.getText().toString().trim().isEmpty());
+                if(old==null)j.put("source","Manual entry");
                 if(index<0)items.put(j);}catch(Exception ignored){}
             save();render();
           }).show();
@@ -347,6 +352,8 @@ public class MainActivity extends Activity {
         c=card();c.addView(text("Privacy and limitations",17,NAVY,true));
         c.addView(text("BOQs and contacts are saved on this device. Live searches transmit the search item names to the selected web provider; imported PDFs/images are not uploaded by this app. No multi-device team sync yet. Urdu-script OCR and Excel XLSX need a later release.",13,GRAY,false));
         addBtn(c,"Export item schedule to CSV",this::createExport);
+        c=card();c.addView(text("About ProcureMate",17,NAVY,true));
+        c.addView(text("Owner / Developer: Bilal\nVersion: 0.1.1-beta",14,GRAY,false));
     }
     private void pick(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");
@@ -375,12 +382,12 @@ public class MainActivity extends Activity {
         if("application/pdf".equals(mime)||filename.toLowerCase(Locale.US).endsWith(".pdf")){
             try{ParcelFileDescriptor pfd=getContentResolver().openFileDescriptor(uri,"r");
                 if(pfd==null)throw new IOException("Cannot open PDF");
-                pdf=new PdfRenderer(pfd);pdfPage=0;pdfText=new StringBuilder();processPdf(filename);
+                pdf=new PdfRenderer(pfd);pdfPage=0;pdfText=new StringBuilder();pdfCells=new ArrayList<>();processPdf(filename);
             }catch(Exception e){toast("PDF read error: "+e.getMessage());}
         }else if((mime!=null&&mime.startsWith("image/"))||filename.matches("(?i).*\\.(png|jpg|jpeg|webp)$")){
             try(InputStream in=getContentResolver().openInputStream(uri)){
                 Bitmap bitmap=BitmapFactory.decodeStream(in);if(bitmap==null)throw new IOException("Invalid image");
-                ocr(bitmap,txt->reviewText(txt,filename),()->toast("OCR failed for "+filename));
+                ocrLayout(bitmap,1,(txt,cells)->reviewParsed(GeometryBoqParser.parse(cells),txt,filename),()->toast("OCR failed for "+filename));
             }catch(Exception e){toast("Image read error: "+e.getMessage());}
         }else if(filename.toLowerCase(Locale.US).endsWith(".xlsx")){
             toast("Save Excel as CSV first; XLSX support comes in a later version.");
@@ -389,16 +396,28 @@ public class MainActivity extends Activity {
             catch(Exception e){toast("Text import failed: "+e.getMessage());}
         }
     }
-    private interface OnText{void done(String result);}
-    private void ocr(Bitmap bitmap,OnText cb,Runnable failure){
+
+    private interface OnLayout { void done(String text,ArrayList<GeometryBoqParser.Cell> cells); }
+    private void ocrLayout(Bitmap bitmap,int page,OnLayout cb,Runnable failure){
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).process(InputImage.fromBitmap(bitmap,0))
-           .addOnSuccessListener(r->{bitmap.recycle();cb.done(r.getText());})
+           .addOnSuccessListener(result->{
+               ArrayList<GeometryBoqParser.Cell> cells=new ArrayList<>();
+               for(com.google.mlkit.vision.text.Text.TextBlock block:result.getTextBlocks()){
+                   for(com.google.mlkit.vision.text.Text.Line line:block.getLines()){
+                       Rect r=line.getBoundingBox();
+                       if(r!=null)cells.add(new GeometryBoqParser.Cell(line.getText(),r.left,r.top,r.right,r.bottom,page));
+                   }
+               }
+               String raw=result.getText();bitmap.recycle();cb.done(raw,cells);
+           })
            .addOnFailureListener(e->{bitmap.recycle();failure.run();});
     }
     private void processPdf(String filename){
         if(pdf==null)return;
         if(pdfPage>=Math.min(pdf.getPageCount(),20)){
-            pdf.close();pdf=null;reviewText(pdfText.toString(),filename);return;
+            pdf.close();pdf=null;
+            reviewParsed(GeometryBoqParser.parse(pdfCells),pdfText.toString(),filename);
+            return;
         }
         PdfRenderer.Page page=pdf.openPage(pdfPage);
         float factor=Math.min(2.0f,1600f/Math.max(page.getWidth(),page.getHeight()));
@@ -406,8 +425,56 @@ public class MainActivity extends Activity {
         Bitmap bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);bm.eraseColor(Color.WHITE);
         page.render(bm,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);page.close();
         final int number=++pdfPage;
-        ocr(bm,result->{pdfText.append("\n--- PAGE ").append(number).append(" ---\n").append(result);processPdf(filename);},
-            ()->{pdfText.append("\n--- PAGE ").append(number).append(" OCR ERROR ---");processPdf(filename);});
+        ocrLayout(bm,number,(raw,cells)->{
+              pdfCells.addAll(cells);
+              pdfText.append("\n--- PAGE ").append(number).append(" ---\n").append(raw);
+              processPdf(filename);
+           },()->{pdfText.append("\n--- PAGE ").append(number).append(" OCR ERROR ---");processPdf(filename);});
+    }
+    private void reviewParsed(java.util.List<GeometryBoqParser.Item> extracted,String raw,String source){
+        if(extracted==null||extracted.isEmpty()){
+            reviewText(raw,source);return;
+        }
+        final java.util.List<GeometryBoqParser.Item> rows=GeometryBoqParser.deduplicate(extracted);
+        int uncertain=0;for(GeometryBoqParser.Item item:rows)if(item.needsReview)uncertain++;
+        LinearLayout list=col();list.setPadding(dp(14),dp(8),dp(14),dp(8));
+        list.addView(text("Review "+rows.size()+" separate items. "+uncertain+" have missing or uncertain quantity/unit. Verify against the original document after importing.",13,GRAY,false));
+        for(GeometryBoqParser.Item r:rows){
+            String number=r.serial.isEmpty()?"":r.serial+". ";
+            list.addView(text(number+r.name,14,NAVY,true));
+            list.addView(text("Qty: "+(r.qty.isEmpty()?"CHECK":r.qty)+"  Unit: "+(r.unit.isEmpty()?"CHECK":r.unit)+"  Page: "+r.page,12,r.needsReview?Color.rgb(165,87,19):TEAL,false));
+        }
+        ScrollView scroll=new ScrollView(this);scroll.addView(list);
+        new AlertDialog.Builder(this).setTitle("Review BOQ: "+source).setView(scroll)
+            .setNegativeButton("Cancel",null)
+            .setNeutralButton("Review raw text",(d,w)->reviewText(raw,source))
+            .setPositiveButton("Import "+rows.size()+" items",(d,w)->{
+                int added=importParsed(rows,source);save();tab="Items";render();
+                toast(added+" structured BOQ rows imported. Verify highlighted fields before quotation.");
+            }).show();
+    }
+    private int importParsed(java.util.List<GeometryBoqParser.Item> rows,String source){
+        Set<String> seen=new HashSet<>();
+        for(int i=0;i<items.length();i++){
+            JSONObject j=o(items,i);
+            seen.add((s(j,"serial")+"|"+s(j,"name")+"|"+s(j,"qty")+"|"+s(j,"unit")).toLowerCase(Locale.ROOT));
+        }
+        int added=0;
+        for(GeometryBoqParser.Item row:rows){
+            String key=(row.serial+"|"+row.name+"|"+row.qty+"|"+row.unit).toLowerCase(Locale.ROOT);
+            if(!seen.add(key))continue;
+            String label=source+" (page "+row.page+", row "+row.row+")";
+            addItem(row.name,row.spec,row.qty,row.unit,categorize(row.name),label);
+            try{
+                JSONObject j=o(items,items.length()-1);
+                j.put("serial",row.serial);
+                j.put("review",row.needsReview);
+                j.put("sourcePage",row.page);
+                j.put("sourceRow",row.row);
+            }catch(Exception ignored){}
+            added++;
+        }
+        return added;
     }
     private String read(InputStream in,int max) throws IOException {
         ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[8192];int n,remaining=max;
