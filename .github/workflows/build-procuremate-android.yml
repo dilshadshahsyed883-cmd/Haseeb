@@ -32,6 +32,14 @@ jobs:
           SDKMGR="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -1)"
           test -x "$SDKMGR"
           "$SDKMGR" --sdk_root="${ANDROID_HOME}" "platforms;android-35" "build-tools;35.0.0"
+      - name: Test OCR table row parser
+        run: |
+          set -eu
+          mkdir -p /tmp/procuremate-parser-test
+          javac -d /tmp/procuremate-parser-test \
+            apps/procuremate-android/app/src/main/java/pk/procuremate/app/GeometryBoqParser.java \
+            apps/procuremate-android/app/src/test/java/pk/procuremate/app/GeometryBoqParserTest.java
+          java -cp /tmp/procuremate-parser-test pk.procuremate.app.GeometryBoqParserTest
       - name: Build test APK
         working-directory: apps/procuremate-android
         run: gradle :app:assembleDebug --no-daemon --stacktrace
@@ -44,7 +52,7 @@ jobs:
           sha256sum "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: ProcureMate-Pakistan-v0.1.0-Android-APK
+          name: ProcureMate-Pakistan-v0.1.1-Bilal-OCR-Android-APK
           path: apps/procuremate-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
