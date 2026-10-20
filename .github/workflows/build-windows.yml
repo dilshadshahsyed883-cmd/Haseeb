@@ -38,6 +38,12 @@ jobs:
             }
           }
           if ($hasErrors) { exit 1 }
+      - name: Install pinned Windows audio engine
+        run: python -m pip install --disable-pip-version-check imageio-ffmpeg==0.6.0
+      - name: Bundle FFmpeg inside Audio Cutter release
+        run: python tools/prepare_audio_cutter.py
+      - name: Audio Cutter real MP3 trimming smoke test
+        run: python apps/audio_cutter/main.py --self-test
       - name: Build packages
         run: python tools/haseeb.py package
       - name: Upload build bundle (not from PRs)
