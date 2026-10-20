@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$mutex = New-Object System.Threading.Mutex($false, "Local\HaseebDesktopSync")
+$mutex = New-Object -TypeName System.Threading.Mutex -ArgumentList @($false, "Local\HaseebDesktopSync")
 $locked = $false
 $transcribing = $false
 $exitCode = 0
