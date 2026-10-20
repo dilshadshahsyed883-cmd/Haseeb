@@ -103,6 +103,29 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $runId)) {
     Write-Host "Already deployed run $($runId). No download needed."
     return
 }
+
+# Confirm no app payload/recipe changed since the last installed app source SHA.
+# Unknown or divergent changes always require the original guarded download.
+$installedShaPath = Join-Path $InstallRoot "last-successful-sha.txt"
+$planner = Join-Path $RepoPath "tools\release_planner.py"
+if ((Test-Path -LiteralPath $installedShaPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $planner -PathType Leaf)) {
+    $installedSha = (Get-Content -LiteralPath $installedShaPath -Raw).Trim()
+    if ($installedSha -match '^[a-f0-9]{40}$') {
+        & python $planner --repo $RepoPath --previous-sha $installedSha --current-sha $trustedSha
+        $planResult = $LASTEXITCODE
+        if ($planResult -eq 0) {
+            Write-Host "[HASEEB] Source-only build $runId verified against exact main SHA."
+            Write-Host "[HASEEB] No app/package changes. Skipping redundant artifact download."
+            # This marker identifies only the verified source update, NOT installed apps.
+            Set-Content -Path (Join-Path $InstallRoot "last-verified-source-run.txt") -Value $runId -Encoding ASCII
+            return
+        }
+        if ($planResult -ne 10) {
+            throw "Cannot validate release delta. Existing installed apps preserved."
+        }
+    }
+}
 # A unique attempt directory avoids GH CLI overwrite prompts when an earlier
 # scheduled task was interrupted mid-download.
 $download = Join-Path $env:LOCALAPPDATA ("Haseeb\downloads\run-" + $runId + "-" + [guid]::NewGuid().ToString("N"))

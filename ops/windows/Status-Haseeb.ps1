@@ -23,6 +23,12 @@ function Read-HaseebStatus {
     if (Test-Path -LiteralPath $record -PathType Leaf) {
         $lastRun = (Get-Content -LiteralPath $record -Raw).Trim()
     }
+    $sourceRecord = Join-Path $Root "last-verified-source-run.txt"
+    $lastSourceRun = $null
+    if (Test-Path -LiteralPath $sourceRecord -PathType Leaf) {
+        $candidate = (Get-Content -LiteralPath $sourceRecord -Raw).Trim()
+        if ($candidate -match '^[0-9]{1,20}$') { $lastSourceRun = $candidate }
+    }
     $rootFull = [IO.Path]::GetFullPath($Root)
     $releasesDir = [IO.Path]::GetFullPath((Join-Path $rootFull "releases"))
     $apps = @()
@@ -97,6 +103,7 @@ function Read-HaseebStatus {
         status = "Haseeb PC deployment status"
         installed_root = $rootFull
         last_successful_run = $lastRun
+        last_verified_source_run = $lastSourceRun
         scheduled_task = [pscustomobject]$scheduler
         installed_apps = @($apps | Sort-Object app_id)
         latest_log_path = $latest
@@ -114,8 +121,10 @@ if ($SelfTest) {
         '{"app_id":"example-app","version":"1.2.3","release":"releases/example-app/1.2.3-demo"}' |
             Set-Content -LiteralPath (Join-Path $dir "current.json") -Encoding UTF8
         "123456" | Set-Content -LiteralPath (Join-Path $temp "last-successful-run.txt") -Encoding ASCII
+        "123457" | Set-Content -LiteralPath (Join-Path $temp "last-verified-source-run.txt") -Encoding ASCII
         $health = Read-HaseebStatus -Root $temp -ReadTask $false
         if ($health.last_successful_run -ne "123456" -or
+            $health.last_verified_source_run -ne "123457" -or
             $health.installed_apps.Count -ne 1 -or
             $health.installed_apps[0].state -ne "installed" -or
             $health.installed_apps[0].version -ne "1.2.3") {
@@ -135,8 +144,9 @@ if ($Json) {
 }
 else {
     Write-Host "HASEEB / DEPLOYMENT SYSTEM" -ForegroundColor Cyan
-    Write-Host "Last installed GitHub run: $($report.last_successful_run)"
-    Write-Host "Hourly scheduled task: $($report.scheduled_task.state)"
+    Write-Host "Last installed app bundle run: $($report.last_successful_run)"
+    Write-Host "Last verified source-only run: $($report.last_verified_source_run)"
+    Write-Host "Scheduled auto-deploy task: $($report.scheduled_task.state)"
     Write-Host "Last scheduler result: $($report.scheduled_task.last_result)"
     Write-Host "Next scheduled run: $($report.scheduled_task.next_run)"
     foreach ($app in @($report.installed_apps)) {

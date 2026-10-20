@@ -33,6 +33,36 @@ Only after the first manual sync is confirmed:
 
 This registers the existing Windows Scheduled Task named `HaseebDesktopSync` to check GitHub every **2 minutes**, rather than hourly. On a matching successful `main` Windows Build, it downloads and activates the validated bundle automatically. The PC must be awake and connected to the internet; a build ready just after a check waits until the next check (usually within about 2 minutes), plus normal download/install time. This is fast periodic polling, **not an instantaneous GitHub push**. No public listener, inbound SSH rule, or self-hosted Actions runner is configured.
 
+## Source-only update fast path (no unnecessary application download)
+
+A successful GitHub Windows Build on `main` is ALWAYS verified against
+the exact trusted commit SHA. After local source fast-forward, the updater
+compares the previously installed app-release SHA with the new main SHA
+using an ancestor-checked git diff. If ONLY an explicit allowlist of
+deployment system files, docs and tests changed, it skips downloading the
+unchanged ~31 MB application bundle.
+
+Allowed safe changes include `ops/windows/`, `docs/`, `tests/`,
+`tools/release_planner.py`, `tools/download_artifact.py`,
+`tools/pc_reporter.py`, plus a few known documentation/report workflow
+files. ANY change under `apps/`, to the package builder
+`tools/haseeb.py`, the FFmpeg packager, the Windows build workflow or an
+unknown path still REQUIRES the full bundle download, checksum checks,
+smoke tests and guarded activation. Unknown, missing or divergent
+previous commit SHA cannot skip the bundle.
+
+The `last-successful-run.txt` marker continues to mean the last
+**actually installed app bundle**, never merely a successful source
+merge. `last-verified-source-run.txt` records the most recent successful
+system-only source build, separately surfaced by Status-Haseeb.ps1.
+An updater still needs the PC awake/online to check remote CI.
+
+This optimization avoids repeated long artifact downloads for updates
+that changed deployment scripts but did not change the applications.
+It does NOT repair underlying GitHub/CDN connectivity for genuinely
+new app releases; inspect local sanitized download diagnostic logs if
+an app-bundle download times out.
+
 ## Multi-app release safety
 
 System-only `deploy-bundle` validates every packaged app before it updates
