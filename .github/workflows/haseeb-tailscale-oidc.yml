@@ -53,8 +53,17 @@ jobs:
             echo "PC peer check skipped; set haseeb-pc environment variable HASEEB_PC_TAILSCALE_IP to opt in."
             exit 0
           fi
-          if timeout 35s tailscale ping -c 1 --timeout 20s "${HASEEB_PC_IP}" >/dev/null 2>&1; then
-            echo "Haseeb PC Tailscale ping succeeded."
+          echo "Checking Tailscale peer discovery via TSMP (not an access-policy proof):"
+          if timeout 20s tailscale ping --tsmp -c 1 --timeout 12s "${HASEEB_PC_IP}"; then
+            echo "Tailscale TSMP peer communication succeeded."
           else
-            echo "::warning::Haseeb PC peer ping failed or ACL disallows it. No PC commands were executed."
+            echo "::warning::Tailscale TSMP peer communication failed; peer may be offline or unreachable."
+          fi
+
+          echo "Checking actual ICMP reachability through the Haseeb-only icmp:* grant:"
+          if timeout 20s tailscale ping --icmp -c 1 --timeout 12s "${HASEEB_PC_IP}"; then
+            echo "Haseeb Windows PC ICMP ping PASS; Tailscale access-policy path verified."
+          else
+            echo "::error::Haseeb Windows PC ICMP ping FAILED. Check PC online status, ACL, or Windows firewall. No PC commands executed."
+            exit 1
           fi
