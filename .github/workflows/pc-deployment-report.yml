@@ -1,0 +1,35 @@
+name: Haseeb PC Deployment Feedback
+
+on:
+  repository_dispatch:
+    types: [haseeb_pc_deployment_report]
+
+permissions:
+  contents: read
+
+jobs:
+  record-pc-deployment:
+    name: Record PC deployment outcome
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate PC report and create Actions summary
+        env:
+          EVENT_PATH: ${{ github.event_path }}
+          SUMMARY_PATH: ${{ github.step_summary }}
+        run: |
+          python tools/pc_reporter.py export-dispatch \
+            --event-path "$EVENT_PATH" \
+            --output pc-deployment-report.json \
+            --summary "$SUMMARY_PATH"
+      - name: Upload structured PC report
+        uses: actions/upload-artifact@v4
+        with:
+          name: haseeb-pc-deployment-report
+          path: pc-deployment-report.json
+          if-no-files-found: error
+          retention-days: 30
