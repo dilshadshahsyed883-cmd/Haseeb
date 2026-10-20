@@ -93,6 +93,8 @@ try {
     Write-Host "Validating and activating $($archivePaths.Count) app packages as one bundle"
     & python (Join-Path $RepoPath "tools\haseeb.py") deploy-bundle --root $InstallRoot @archivePaths
     if ($LASTEXITCODE -ne 0) { throw "Bundle deployment failed; successful-run marker not advanced." }
+    # Preserve the exact installed source SHA for trusted PC->GitHub reporting.
+    Set-Content -Path (Join-Path $InstallRoot "last-successful-sha.txt") -Value $trustedSha -Encoding ASCII
     Set-Content -Path $marker -Value ($runId) -Encoding ASCII
     Write-Host "Haseeb PC deployment complete for run $($runId)"
 }
