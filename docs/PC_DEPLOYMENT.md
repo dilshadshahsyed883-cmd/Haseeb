@@ -33,6 +33,29 @@ Only after the first manual sync is confirmed:
 
 This creates a Windows Scheduled Task named `HaseebDesktopSync`. No public listener, inbound SSH rule, or self-hosted Actions runner is configured by this project.
 
+## Multi-app release safety
+
+System-only `deploy-bundle` validates every packaged app before it updates
+ANY active app pointer. It checks per-ZIP SHA-256 companions, archive paths,
+manifests, duplicate app IDs and each application's existing `--self-test`.
+Only after the entire set passes does it activate new release pointers.
+If a pointer write fails during activation, the updater restores saved
+`current.json` and `previous.json` pointers for ALL affected apps.
+The old working release files are never deleted as part of deployment.
+
+The successful GitHub run ID marker is written only if bundle deployment
+completed successfully. Failed runs retry normally on the next scheduled
+check, without silently marking the failed release as installed.
+
+CI tests use isolated synthetic archives under temporary directories:
+successful multi-app upgrade, failing later app, missing checksum, duplicate
+app ID, and simulated pointer-write failure/recovery. No actual Haseeb PC
+application source code or owner files are used in these tests.
+
+Note: pointer restoration handles ordinary runtime errors; simultaneous
+machine power loss during a multi-file pointer write is not a full
+durable database transaction. Backups/previous releases remain available.
+
 ## Hourly updater system reliability
 
 The owner's existing PC remains the only installation target. The repository
