@@ -49,6 +49,18 @@ class FastAutoDeployContracts(unittest.TestCase):
         self.assertIn('[guid]::NewGuid().ToString("N")', SYNC)
         self.assertIn('if ($LASTEXITCODE -ne 0) { throw "Artifact download failed" }', SYNC)
 
+    def test_source_update_reloads_script_once_before_app_deployment(self):
+        self.assertIn('[switch]$AfterSourceRefresh', SYNC)
+        self.assertIn('git -C $RepoPath rev-parse HEAD', SYNC)
+        self.assertIn('$executingSourceSha -ne $trustedSha', SYNC)
+        self.assertIn('if ($AfterSourceRefresh)', SYNC)
+        self.assertIn('-File $PSCommandPath -RepoPath $RepoPath -InstallRoot $InstallRoot -AfterSourceRefresh', SYNC)
+        self.assertIn('if ($freshExit -ne 0)', SYNC)
+        self.assertLess(SYNC.index('if ($executingSourceSha -ne $trustedSha)'),
+                        SYNC.index('# Plan source-only updates'))
+        self.assertLess(SYNC.index('if ($executingSourceSha -ne $trustedSha)'),
+                        SYNC.index('# A unique attempt directory'))
+
     def test_no_remote_shell_or_network_listener(self):
         self.assertNotIn('sshd', SYNC.lower())
         self.assertNotIn('netsh advfirewall', SYNC.lower())
