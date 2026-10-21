@@ -32,7 +32,9 @@ if ($RegisterTask) {
     # Near-real-time release readiness detection: check GitHub every 2 minutes.
     # The task runs only when PC is awake/online and calls the exact-main
     # successful-build guarded updater; no inbound PC ports or SSH needed.
-    $task = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $runner + '"'
+    # Keep the 2-minute updater invisible: logs and exit codes are still
+    # recorded by Run-HaseebSync.ps1 without interrupting desktop apps.
+    $task = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $runner + '"'
     & schtasks.exe /Create /F /SC MINUTE /MO 2 /TN "HaseebDesktopSync" /TR $task
     if ($LASTEXITCODE -ne 0) { throw "Scheduled task registration failed." }
     Write-Host "HaseebDesktopSync registered: check GitHub every 2 minutes (automatic on successful build)."
@@ -112,7 +114,7 @@ if ($executingSourceSha -ne $trustedSha) {
         throw "Main advanced during source refresh. Retry at next scheduled check."
     }
     Write-Host "[HASEEB] Source changed. Reloading updater in a fresh process before deployment."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -RepoPath $RepoPath -InstallRoot $InstallRoot -AfterSourceRefresh
+    & powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $PSCommandPath -RepoPath $RepoPath -InstallRoot $InstallRoot -AfterSourceRefresh
     $freshExit = $LASTEXITCODE
     if ($freshExit -ne 0) { throw "Fresh updater failed (exit code $freshExit); installed apps preserved." }
     return

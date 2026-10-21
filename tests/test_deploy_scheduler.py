@@ -61,6 +61,20 @@ class FastAutoDeployContracts(unittest.TestCase):
         self.assertLess(SYNC.index('if ($executingSourceSha -ne $trustedSha)'),
                         SYNC.index('# A unique attempt directory'))
 
+    def test_scheduled_updater_runs_without_popup_windows(self):
+        self.assertIn(
+            "'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden"
+            " -ExecutionPolicy Bypass -File",
+            SYNC,
+        )
+        self.assertIn(
+            "& powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden"
+            " -ExecutionPolicy Bypass -File $PSCommandPath",
+            SYNC,
+        )
+        self.assertIn('/SC MINUTE /MO 2 /TN "HaseebDesktopSync"', SYNC)
+        self.assertIn('Run-HaseebSync.ps1', SYNC)
+
     def test_no_remote_shell_or_network_listener(self):
         self.assertNotIn('sshd', SYNC.lower())
         self.assertNotIn('netsh advfirewall', SYNC.lower())

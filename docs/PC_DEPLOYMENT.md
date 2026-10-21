@@ -33,6 +33,28 @@ Only after the first manual sync is confirmed:
 
 This registers the existing Windows Scheduled Task named `HaseebDesktopSync` to check GitHub every **2 minutes**, rather than hourly. On a matching successful `main` Windows Build, it downloads and activates the validated bundle automatically. The PC must be awake and connected to the internet; a build ready just after a check waits until the next check (usually within about 2 minutes), plus normal download/install time. This is fast periodic polling, **not an instantaneous GitHub push**. No public listener, inbound SSH rule, or self-hosted Actions runner is configured.
 
+## Run scheduled updates silently (no PowerShell popup)
+
+The owner PC checks GitHub every two minutes through `HaseebDesktopSync`.
+That should happen **in the background**, not in a PowerShell window on
+the desktop. Task registration uses `-NoProfile -NonInteractive
+-WindowStyle Hidden`, and the guarded updater's one-time new-source
+child process uses the same invisible launch setting. Per-run transcript
+logs, installed release checks, last-result and retry behavior remain
+unchanged.
+
+Existing scheduled task actions do NOT change merely by pulling this
+new repo commit. After the new system code is available on the PC,
+re-register **once** without running a manual deployment:
+
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Haseeb\repo\ops\windows\Sync-Haseeb.ps1" -RegisterTask
+
+This replaces the task's stored command with the invisible mode;
+retains the two-minute interval and same PC/GitHub credentials. Inspect
+its action with `(Get-ScheduledTask -TaskName HaseebDesktopSync).Actions`,
+and verify updates through `Status-Haseeb.ps1` and local logs.
+Do not disable the task, since that would stop automatic GitHub updates.
+
 ## Updater reload when a verified main commit changes
 
 Windows PowerShell keeps its already-parsed script in memory even if Git
