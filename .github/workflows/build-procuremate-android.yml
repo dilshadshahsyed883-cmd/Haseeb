@@ -1,0 +1,64 @@
+name: Build ProcureMate Android APK
+
+on:
+  push:
+    branches:
+      - feature/procuremate-android-mvp-20261021
+    paths:
+      - 'apps/procuremate-android/**'
+      - '.github/workflows/build-procuremate-android.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/procuremate-android/**'
+      - '.github/workflows/build-procuremate-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Install SDK 35
+        run: |
+          set -eu
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          SDKMGR="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -1)"
+          test -x "$SDKMGR"
+          "$SDKMGR" --sdk_root="${ANDROID_HOME}" "platforms;android-35" "build-tools;35.0.0"
+      - name: Test OCR table row parser
+        run: |
+          set -eu
+          mkdir -p /tmp/procuremate-parser-test
+          javac -d /tmp/procuremate-parser-test \
+            apps/procuremate-android/app/src/main/java/pk/procuremate/app/GeometryBoqParser.java \
+            apps/procuremate-android/app/src/test/java/pk/procuremate/app/GeometryBoqParserTest.java
+          java -cp /tmp/procuremate-parser-test pk.procuremate.app.GeometryBoqParserTest
+      - name: Build test APK
+        working-directory: apps/procuremate-android
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK package
+        run: |
+          set -eu
+          APK=apps/procuremate-android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='pk.procuremate.app'"
+          sha256sum "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProcureMate-Pakistan-v0.1.1-Bilal-OCR-Android-APK
+          path: apps/procuremate-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
